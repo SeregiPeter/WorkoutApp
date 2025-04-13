@@ -1,6 +1,8 @@
 package com.example.workoutapp.ui.challenges
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -10,26 +12,32 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import com.example.workoutapp.R
-import com.example.workoutapp.data.ChallengeResult
+import com.example.workoutapp.data.ChallengeResultEntity
 import com.example.workoutapp.viewmodels.ChallengeViewModel
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.components.XAxis
@@ -56,6 +64,17 @@ fun ChallengeResultsScreen(
     }
 
     val results by challengeViewModel.results.collectAsState()
+    val errorMessage by challengeViewModel.uiErrorMessage.collectAsState()
+    val isLoading by challengeViewModel.isLoading.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            challengeViewModel.clearError()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -67,10 +86,18 @@ fun ChallengeResultsScreen(
                     }
                 }
             )
+        },
+        snackbarHost = {
+            SnackbarHost(snackbarHostState)
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
-            if (results.isEmpty()) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize().testTag("loadingBox"), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+            else if (results.isEmpty()) {
                 Text(
                     text = "No results yet.",
                     modifier = Modifier.padding(16.dp)
@@ -89,7 +116,7 @@ fun ChallengeResultsScreen(
 }
 
 @Composable
-fun ResultItem(result: ChallengeResult) {
+fun ResultItem(result: ChallengeResultEntity) {
     val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
     val dateText = dateFormat.format(Date(result.timestamp))
 
@@ -107,7 +134,7 @@ fun ResultItem(result: ChallengeResult) {
 }
 
 @Composable
-fun ChallengeResultsChart(results: List<ChallengeResult>) {
+fun ChallengeResultsChart(results: List<ChallengeResultEntity>) {
     AndroidView(
         factory = { context ->
             LineChart(context).apply {

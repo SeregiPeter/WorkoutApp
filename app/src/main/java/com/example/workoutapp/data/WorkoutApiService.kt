@@ -1,11 +1,9 @@
 package com.example.workoutapp.data
 
-import retrofit2.http.Body
 import retrofit2.http.GET
-import retrofit2.http.POST
 import retrofit2.http.Path
 
-interface ApiService {
+interface WorkoutApiService {
     @GET("exercises")
     suspend fun getExercises(): List<Exercise>
 
@@ -18,11 +16,8 @@ interface ApiService {
     @GET("workouts/{id}")
     suspend fun getWorkout(@Path("id") workoutId: Int): Workout
 
-    @GET("categories/{id}")
-    suspend fun getCategory(@Path("id") categoryId: Int): Category
-
-    @POST("workouts")
-    suspend fun createWorkout(@Body workout: WorkoutCreateRequest): Workout
+    @GET("categories")
+    suspend fun getCategories(): List<Category>
 
     @GET("challenges")
     suspend fun getChallenges(): List<Challenge>

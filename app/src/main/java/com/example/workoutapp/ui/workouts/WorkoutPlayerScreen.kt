@@ -31,6 +31,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -43,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,21 +58,104 @@ import com.example.workoutapp.data.WorkoutExercise
 import com.example.workoutapp.ui.CircularProgressCountdown
 import com.example.workoutapp.viewmodels.WorkoutViewModel
 import kotlinx.coroutines.delay
+import java.util.UUID
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WorkoutPlayerScreen(navController: NavController, workoutId: Int, workoutViewModel: WorkoutViewModel = viewModel()) {
+fun WorkoutPlayerScreen(navController: NavController, workoutId: Int, remote: Boolean, workoutViewModel: WorkoutViewModel = viewModel()) {
     val workout by workoutViewModel.selectedWorkout.collectAsState()
 
-    LaunchedEffect(key1 = workoutId) {
-        workoutViewModel.fetchWorkout(workoutId)
+    val isLoading by workoutViewModel.isLoading.collectAsState()
+    val errorMessage by workoutViewModel.uiErrorMessage.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
+            workoutViewModel.clearError()
+        }
     }
 
-    if (workout == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+    LaunchedEffect(key1 = workoutId) {
+        workoutViewModel.fetchWorkout(workoutId, remote)
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(modifier = Modifier.testTag("workoutPlayerNameText"), text = workout?.name ?: "Workout") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Exit")
+                    }
+                }
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { paddingValues ->
+
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if (workout == null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Workout cannot be loaded.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        } else {
+            var state by remember { mutableStateOf(WorkoutState(workout)) }
+            var sidebarExpanded by remember { mutableStateOf(false) }
+
+            LaunchedEffect(workout) {
+                state = WorkoutState(workout)
+            }
+
+            LaunchedEffect(state.timeLeft, state.isRunning) {
+                if (state.isRunning && state.timeLeft > 0) {
+                    delay(1000L)
+                    state = state.copy(timeLeft = state.timeLeft - 1)
+                } else if (state.isRunning && state.timeLeft == 0) {
+                    state = state.nextStep()
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 48.dp)
+                        .padding(16.dp)
+                ) {
+                    when {
+                        !state.workoutStarted -> WorkoutStartScreen {
+                            state = state.copy(workoutStarted = true)
+                        }
+
+                        state.currentExercise == null -> WorkoutCompleteScreen(navController)
+                        else -> WorkoutExerciseScreen(state) { newState -> state = newState }
+                    }
+                }
+
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .align(Alignment.CenterEnd)
+                ) {
+                    WorkoutSidebar(state, sidebarExpanded) { sidebarExpanded = !sidebarExpanded }
+                }
+            }
         }
-    } else {
-        WorkoutPlayerContent(navController, workout)
     }
 }
 
@@ -94,7 +181,7 @@ fun WorkoutPlayerContent(navController: NavController, workout: Workout?) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(workout?.name ?: "Workout") },
+                title = { Text(modifier = Modifier.testTag("workoutPlayerNameText"), text = workout?.name ?: "Workout") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.Close, contentDescription = "Exit")
@@ -146,7 +233,9 @@ fun WorkoutSidebar(state: WorkoutState, expanded: Boolean, onExpandToggle: () ->
         contentAlignment = Alignment.TopCenter
     ) {
         Column(
-            modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
@@ -260,7 +349,9 @@ fun WorkoutCompleteScreen(navController: NavController) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = { navController.popBackStack() }) {
+        Button(onClick = { navController.navigate("workoutList") {
+            popUpTo("workoutList") { inclusive = true }
+        } }) {
             Text("Finish")
         }
 
@@ -325,7 +416,8 @@ fun WorkoutExerciseScreen(state: WorkoutState, onStateChange: (WorkoutState) -> 
                             CircularProgressCountdown(
                                 durationSeconds = if (state.isResting) stableTimeLeft else currentExercise.duration ?: 0,
                                 timeLeft = state.timeLeft,
-                                isRunning = state.isRunning
+                                isRunning = state.isRunning,
+                                countdownId = state.countdownId
                             )
                         }
                     } else {
@@ -345,6 +437,13 @@ fun WorkoutExerciseScreen(state: WorkoutState, onStateChange: (WorkoutState) -> 
         ) {
             Text(if (state.isResting) "Continue" else "Next")
         }
+
+        Text(
+            text = state.getNextStepDescription(),
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 16.dp)
+        )
     }
 }
 
@@ -359,7 +458,8 @@ data class WorkoutState(
     val isRunning: Boolean = workout?.exercises?.firstOrNull()?.duration_based == true,
     val isResting: Boolean = false,
     val afterExerciseRest: Boolean = false,
-    val workoutStarted: Boolean = false
+    val workoutStarted: Boolean = false,
+    val countdownId: String = UUID.randomUUID().toString()
 ) {
     val currentExercise: WorkoutExercise? = workout?.exercises?.getOrNull(exerciseIndex)
 
@@ -370,7 +470,8 @@ data class WorkoutState(
             timeLeft = if (nextExercise.duration_based) nextExercise.duration ?: 0 else 0,
             isRunning = nextExercise.duration_based,
             isResting = false,
-            afterExerciseRest = false
+            afterExerciseRest = false,
+            countdownId = UUID.randomUUID().toString()
         )
     }
 
@@ -379,7 +480,8 @@ data class WorkoutState(
             isResting = true,
             afterExerciseRest = isAfterExercise,
             timeLeft = restTime,
-            isRunning = true
+            isRunning = true,
+            countdownId = UUID.randomUUID().toString()
         )
     }
 
@@ -390,7 +492,8 @@ data class WorkoutState(
                 setIndex = nextSetIndex,
                 isResting = false,
                 isRunning = currentExercise?.duration_based == true,
-                timeLeft = if (currentExercise?.duration_based == true) currentExercise.duration ?: 0 else 0
+                timeLeft = if (currentExercise?.duration_based == true) currentExercise.duration ?: 0 else 0,
+                countdownId = UUID.randomUUID().toString()
             )
         } else {
             startRest(currentExercise?.rest_time_after ?: 30, isAfterExercise = true)
@@ -401,7 +504,7 @@ data class WorkoutState(
     private fun moveToNextExercise(): WorkoutState {
         val nextExerciseIndex = exerciseIndex + 1
         return if (nextExerciseIndex < (workout?.exercises?.size ?: 0)) {
-            copy(exerciseIndex = nextExerciseIndex, isResting = false, afterExerciseRest = false).startNextExercise()
+            copy(exerciseIndex = nextExerciseIndex, isResting = false, afterExerciseRest = false, countdownId = UUID.randomUUID().toString()).startNextExercise()
         } else {
             completeWorkout()
         }
@@ -412,7 +515,8 @@ data class WorkoutState(
             workoutStarted = true,
             exerciseIndex = workout?.exercises?.size ?: 0,
             isRunning = false,
-            isResting = false
+            isResting = false,
+            countdownId = UUID.randomUUID().toString()
         )
     }
 
@@ -439,6 +543,55 @@ data class WorkoutState(
             }
         }
     }
+
+    fun getNextStepDescription(): String {
+        val current = currentExercise ?: return "Workout complete"
+        val hasMoreSets = setIndex + 1 < (current.sets ?: 1)
+
+        return when {
+            afterExerciseRest -> {
+                val nextExercise = workout?.exercises?.getOrNull(exerciseIndex + 1)
+                if (nextExercise != null) {
+                    if (nextExercise.duration_based) {
+                        "Next: ${nextExercise.name} - ${nextExercise.duration} sec"
+                    } else {
+                        "Next: ${nextExercise.name} - ${nextExercise.reps} reps"
+                    }
+                } else {
+                    "Workout complete"
+                }
+            }
+
+            isResting -> {
+                if (hasMoreSets) {
+                    if (current.duration_based) {
+                        "Next: Set ${setIndex + 2} - ${current.duration} sec"
+                    } else {
+                        "Next: Set ${setIndex + 2} - ${current.reps} reps"
+                    }
+                } else {
+                    "Next: Rest ${current.rest_time_after} sec"
+                }
+            }
+
+            current.duration_based -> {
+                if (hasMoreSets) {
+                    "Next: Rest ${current.rest_time_between} sec"
+                } else {
+                    "Next: Rest ${current.rest_time_after} sec"
+                }
+            }
+
+            else -> {
+                if (hasMoreSets) {
+                    "Next: Rest ${current.rest_time_between} sec"
+                } else {
+                    "Next: Rest ${current.rest_time_after} sec"
+                }
+            }
+        }
+    }
+
 }
 
 

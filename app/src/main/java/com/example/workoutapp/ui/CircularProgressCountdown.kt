@@ -19,10 +19,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun CircularProgressCountdown(durationSeconds: Int, timeLeft: Int, isRunning: Boolean) {
+fun CircularProgressCountdown(durationSeconds: Int, timeLeft: Int, isRunning: Boolean, countdownId: String) {
     val progress = remember { Animatable(1f) }
 
-    LaunchedEffect(isRunning, durationSeconds) {
+
+    LaunchedEffect(countdownId) {
         if (isRunning) {
             progress.snapTo(1f)
             progress.animateTo(

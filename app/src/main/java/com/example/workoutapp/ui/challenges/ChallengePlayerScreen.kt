@@ -25,6 +25,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -39,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -50,6 +53,7 @@ import com.example.workoutapp.ui.CircularProgressCountdown
 import com.example.workoutapp.viewmodels.ChallengeViewModel
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChallengePlayerScreen(
     navController: NavController,
@@ -57,23 +61,61 @@ fun ChallengePlayerScreen(
     challengeViewModel: ChallengeViewModel = viewModel()
 ) {
     val challenge by challengeViewModel.selectedChallenge.collectAsState()
+    val isLoading by challengeViewModel.isLoading.collectAsState()
+    val errorMessage by challengeViewModel.uiErrorMessage.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(challengeId) {
         challengeViewModel.fetchChallenge(challengeId)
     }
 
-    if (challenge == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            challengeViewModel.clearError()
         }
-    } else {
-        ChallengePlayerContent(navController, challenge!!, challengeViewModel)
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(modifier = Modifier.testTag("challengePlayerNameText"), text = challenge?.name ?: "Challenge Player") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Exit")
+                    }
+                }
+            )
+        },
+        snackbarHost = {
+            SnackbarHost(snackbarHostState)
+        }
+    ) { paddingValues ->
+
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if(challenge == null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "Challenge could not be loaded.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        } else {
+            ChallengePlayerContent(navController, challenge!!, challengeViewModel, paddingValues)
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChallengePlayerContent(navController: NavController, challenge: Challenge, challengeViewModel: ChallengeViewModel) {
+fun ChallengePlayerContent(navController: NavController, challenge: Challenge, challengeViewModel: ChallengeViewModel, paddingValues: PaddingValues) {
     var timeLeft by remember { mutableStateOf(0) }
     var reps by remember { mutableStateOf(0) }
     var isRunning by remember { mutableStateOf(false) }
@@ -130,18 +172,7 @@ fun ChallengePlayerContent(navController: NavController, challenge: Challenge, c
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(challenge.name) },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.Close, contentDescription = "Exit")
-                    }
-                }
-            )
-        }
-    ) { paddingValues ->
+
         ChallengePlayerBody(
             challenge = challenge,
             challengeViewModel = challengeViewModel,
@@ -183,7 +214,7 @@ fun ChallengePlayerContent(navController: NavController, challenge: Challenge, c
                 }
             }
         }
-    }
+
 }
 
 
@@ -264,7 +295,8 @@ fun ChallengePlayerBody(
                             CircularProgressCountdown(
                                 durationSeconds = challenge.duration ?: 60,
                                 timeLeft = timeLeft,
-                                isRunning = isRunning
+                                isRunning = isRunning,
+                                ""
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(

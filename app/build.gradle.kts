@@ -77,6 +77,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.navigation:navigation-runtime-ktx:2.8.6")
     implementation("androidx.navigation:navigation-compose:2.8.6")
+    implementation("androidx.test.uiautomator:uiautomator:2.3.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
@@ -115,5 +116,18 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
 
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+
+
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.6.1")
+
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.6.1")
+
+    implementation("com.google.maps.android:maps-compose:2.11.4")
+    implementation("com.google.android.gms:play-services-maps:18.2.0")
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+
+    implementation("com.google.accompanist:accompanist-permissions:0.34.0")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
 }

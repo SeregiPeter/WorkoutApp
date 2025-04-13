@@ -3,13 +3,10 @@ package com.example.workoutapp.viewmodels
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.workoutapp.Config
 import com.example.workoutapp.data.Repository
+import com.example.workoutapp.data.Result
 import com.example.workoutapp.data.Workout
 import com.example.workoutapp.data.WorkoutCreateRequest
-import com.example.workoutapp.data.WorkoutExercise
-import com.example.workoutapp.data.dummyExercises
-import com.example.workoutapp.data.dummyWorkouts
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -25,92 +22,101 @@ class WorkoutViewModel(private val repository: Repository) : ViewModel() {
     private val _workoutCreated = MutableStateFlow<Boolean>(false)
     val workoutCreated: StateFlow<Boolean> = _workoutCreated
 
-//    init {
-//        fetchWorkouts()
-//    }
+    private val _uiErrorMessage = MutableStateFlow<String?>(null)
+    val uiErrorMessage: StateFlow<String?> = _uiErrorMessage
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading
+
+    init {
+        fetchWorkouts()
+    }
 
     fun fetchWorkouts() {
         viewModelScope.launch {
-            if(Config.USE_DUMMY_DATA) {
-                _workouts.value = dummyWorkouts
-            } else {
-                try {
-                    val response = repository.getWorkouts()
-                    Log.d("WorkoutViewModel", "API Response: $response")
-                    _workouts.value = response
-                } catch (e: Exception) {
-                    Log.e("WorkoutViewModel", "Error fetching workouts", e)
-                }
+            if(_workouts.value.isEmpty()) {
+                _isLoading.value = true
             }
+            when (val result = repository.getWorkouts()) {
+                is Result.Success -> _workouts.value = result.data
+                is Result.Error -> {
+                    Log.e("WorkoutViewModel", "Error fetching workouts", result.exception)
+                    _uiErrorMessage.value = getFriendlyErrorMessage(result.exception)
+                }
+
+                else -> {}
+            }
+            _isLoading.value = false
         }
     }
 
-    fun fetchWorkout(id: Int) {
+    fun fetchWorkout(id: Int, remote: Boolean) {
         viewModelScope.launch {
-            if(Config.USE_DUMMY_DATA) {
-                _selectedWorkout.value = dummyWorkouts.find{it.id == id}
-            } else {
-                try {
-                    val response = repository.getWorkout(id)
-                    Log.d("WorkoutViewModel", "API Response: $response")
-                    _selectedWorkout.value = response
-                } catch (e: Exception) {
-                    Log.e("WorkoutViewModel", "Error fetching workout with ID: $id", e)
+            _isLoading.value = true
+            when (val result = repository.getWorkout(id, remote)) {
+                is Result.Success -> _selectedWorkout.value = result.data
+                is Result.Error -> {
+                    Log.e("WorkoutViewModel", "Error fetching workout with ID: $id", result.exception)
+                    _uiErrorMessage.value = getFriendlyErrorMessage(result.exception)
                 }
-            }
 
+                else -> {}
+            }
+            _isLoading.value = false
         }
     }
 
     fun createWorkout(workout: WorkoutCreateRequest) {
         viewModelScope.launch {
-            if (Config.USE_DUMMY_DATA) {
-                val exercises = dummyExercises
-                val newWorkout = Workout(
-                    id = (_workouts.value.maxOfOrNull { it.id } ?: 0) + 1,
-                    name = workout.name,
-                    exercises = workout.exercises.mapNotNull { we ->
-                        val exercise = exercises.find { it.id == we.exercise_id }
-                        if (exercise != null) {
-                            WorkoutExercise(
-                                id = exercise.id,
-                                name = exercise.name,
-                                description = exercise.description,
-                                video_url = exercise.video_url,
-                                image_url = exercise.image_url,
-                                duration_based = exercise.duration_based,
-                                sets = we.sets,
-                                reps = we.reps,
-                                duration = we.duration,
-                                rest_time_between = we.rest_time_between,
-                                rest_time_after = we.rest_time_after
-                            )
-                        } else {
-                            null
-                        }
-                    }
-                )
-                _workouts.value = _workouts.value + listOf(newWorkout)
-                _workoutCreated.value = true
-                dummyWorkouts = dummyWorkouts + newWorkout
-                Log.d("WorkoutViewModel", "Dummy workout created: $newWorkout")
-                Log.d("WorkoutViewModel", workouts.value.toString())
-
-            } else {
-                try {
-                    val createdWorkout = repository.createWorkout(workout)
-                    _workouts.value = _workouts.value + createdWorkout
+            _isLoading.value = true
+            when (val result = repository.createWorkout(workout)) {
+                is Result.Success -> {
+                    _workouts.value = _workouts.value + result.data
                     _workoutCreated.value = true
-                    Log.d("WorkoutViewModel", "Workout created successfully: $createdWorkout")
-                } catch (e: Exception) {
-                    Log.e("WorkoutViewModel", "Error creating workout", e)
+                }
+                is Result.Error -> {
+                    Log.e("WorkoutViewModel", "Error creating workout", result.exception)
+                    _uiErrorMessage.value = getFriendlyErrorMessage(result.exception)
                     _workoutCreated.value = false
                 }
+
+                else -> {}
             }
+            _isLoading.value = false
+        }
+    }
+
+    fun deleteWorkout(workoutId: Int) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            when (val result = repository.deleteWorkout(workoutId)) {
+                is Result.Success -> fetchWorkouts()
+                is Result.Error -> {
+                    Log.e("WorkoutViewModel", "Error deleting workout", result.exception)
+                    _uiErrorMessage.value = getFriendlyErrorMessage(result.exception)
+                }
+
+                else -> {}
+            }
+            _isLoading.value = false
         }
     }
 
     fun resetWorkoutCreated() {
         _workoutCreated.value = false
     }
+
+    fun clearError() {
+        _uiErrorMessage.value = null
+    }
+
+    private fun getFriendlyErrorMessage(e: Throwable): String {
+        return when (e) {
+            is java.net.UnknownHostException -> "No internet connection."
+            is retrofit2.HttpException -> "Server error (${e.code()})."
+            is IllegalStateException -> e.message.toString()
+            else -> "Unknown error."
+        }
+    }
 }
+

@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "challenge_results")
-data class ChallengeResult(
+data class ChallengeResultEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val challengeId: Int,
     val challengeName: String,

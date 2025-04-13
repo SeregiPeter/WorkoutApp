@@ -14,12 +14,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -42,6 +44,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -54,16 +58,27 @@ import com.example.workoutapp.viewmodels.WorkoutViewModel
 fun WorkoutListScreen(
     navController: NavController,
     workoutViewModel: WorkoutViewModel = viewModel(),
-    workoutCreated: Boolean = false
+    triedToCreateWorkout: Boolean = false
 ) {
 
     val snackBarHostState = remember { SnackbarHostState()}
 
     val workouts by workoutViewModel.workouts.collectAsState()
+    val workoutCreated by workoutViewModel.workoutCreated.collectAsState()
+    val errorMessage by workoutViewModel.uiErrorMessage.collectAsState()
+    val isLoading by workoutViewModel.isLoading.collectAsState()
 
-    LaunchedEffect(workoutCreated) {
-        if (workoutCreated) {
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let { message ->
+            snackBarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+            workoutViewModel.clearError()
+        }
+    }
+
+    LaunchedEffect(triedToCreateWorkout, workoutCreated) {
+        if (triedToCreateWorkout && workoutCreated) {
             snackBarHostState.showSnackbar("Workout successfully created!")
+            workoutViewModel.resetWorkoutCreated()
         }
     }
 
@@ -76,12 +91,15 @@ fun WorkoutListScreen(
         snackbarHost = { SnackbarHost(hostState = snackBarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Workouts") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                }
+                title = { Text(
+                    text = "Workouts",
+                    modifier = Modifier.testTag("workoutsTitleText")
+                ) },
+//                navigationIcon = {
+//                    IconButton(onClick = { navController.popBackStack() }) {
+//                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+//                    }
+//                }
             )
         },
         floatingActionButton = {
@@ -95,14 +113,26 @@ fun WorkoutListScreen(
         }
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues)) {
-            if (workouts.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize().testTag("loadingBox"), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
+            }
+            else if (workouts.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "No Workouts found.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
             } else {
                 LazyColumn(modifier = Modifier.padding(16.dp)) {
-                    items(workouts, key = { it.id }) { workout ->
-                        WorkoutItem(workout, navController)
+                    items(workouts) { workout ->
+                        WorkoutItem(workout, navController, onDeleteClick = { workoutViewModel.deleteWorkout(workout.id)})
                     }
                 }
             }
@@ -112,14 +142,16 @@ fun WorkoutListScreen(
 
 
 @Composable
-fun WorkoutItem(workout: Workout, navController: NavController) {
+fun WorkoutItem(workout: Workout, navController: NavController, onDeleteClick: () -> Unit) {
     var isExpanded by remember { mutableStateOf(false) }
+    var showDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(8.dp)
-            .clickable { isExpanded = !isExpanded },
+            .clickable { isExpanded = !isExpanded }
+            .testTag(workout.id.toString() + "_workoutCard"),
         elevation = CardDefaults.cardElevation(4.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -127,7 +159,7 @@ fun WorkoutItem(workout: Workout, navController: NavController) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { navController.navigate("workoutPlayer/${workout.id}") }) {
+                IconButton(modifier = Modifier.testTag(workout.id.toString() + "_workoutPlayButton"), onClick = { navController.navigate("workoutPlayer/${workout.id}/${workout.remote}") }) {
                     Icon(
                         imageVector = Icons.Default.PlayCircle,
                         contentDescription = "Start workout",
@@ -139,12 +171,18 @@ fun WorkoutItem(workout: Workout, navController: NavController) {
                     text = workout.name,
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f)
+                        .testTag(workout.id.toString() + "_workoutName")
                 )
 
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = if (isExpanded) "Collapse" else "Expand"
                 )
+                if (!workout.remote) {
+                    IconButton(onClick = {showDialog = true}) {
+                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete Workout", tint = Color.Red)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -209,6 +247,31 @@ fun WorkoutItem(workout: Workout, navController: NavController) {
                 }
             }
         }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Delete Workout") },
+            text = { Text("Are you sure you want to delete this workout? This action cannot be undone.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        onDeleteClick()
+                        showDialog = false
+                    }
+                ) {
+                    Text("Delete", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

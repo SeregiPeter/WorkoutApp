@@ -4,21 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessTimeFilled
-import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -27,29 +18,25 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.workoutapp.data.ApiService
-import com.example.workoutapp.data.ChallengeDatabase
+import com.example.workoutapp.data.OverpassApiService
 import com.example.workoutapp.data.Repository
+import com.example.workoutapp.data.WorkoutApiService
+import com.example.workoutapp.data.WorkoutDatabase
 import com.example.workoutapp.ui.HomeScreen
+import com.example.workoutapp.ui.MapScreen
 import com.example.workoutapp.ui.challenges.ChallengeListScreen
 import com.example.workoutapp.ui.challenges.ChallengePlayerScreen
 import com.example.workoutapp.ui.challenges.ChallengeResultsScreen
@@ -62,17 +49,19 @@ import com.example.workoutapp.ui.workouts.WorkoutListScreen
 import com.example.workoutapp.ui.workouts.WorkoutPlayerScreen
 import com.example.workoutapp.viewmodels.ChallengeViewModel
 import com.example.workoutapp.viewmodels.ExerciseViewModel
+import com.example.workoutapp.viewmodels.MapViewModel
 import com.example.workoutapp.viewmodels.MyViewModelFactory
 import com.example.workoutapp.viewmodels.WorkoutViewModel
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     private val repository: Repository by lazy {
         val apiKey = BuildConfig.API_KEY
-        val apiService = Retrofit.Builder()
+        val workoutApiService = Retrofit.Builder()
             .baseUrl("https://believable-vision-production.up.railway.app/")
             .addConverterFactory(GsonConverterFactory.create())
             .client(
@@ -89,12 +78,30 @@ class MainActivity : ComponentActivity() {
                     .build()
             )
             .build()
-            .create(ApiService::class.java)
+            .create(WorkoutApiService::class.java)
 
-        val database = ChallengeDatabase.getDatabase(applicationContext)
+        val overpassApiService: OverpassApiService =
+            Retrofit.Builder()
+                .baseUrl("https://overpass-api.de/api/")
+                .addConverterFactory(GsonConverterFactory.create())
+                .client(
+                    OkHttpClient.Builder()
+                        .addInterceptor(HttpLoggingInterceptor().apply {
+                            level = HttpLoggingInterceptor.Level.BODY
+                        })
+                        .connectTimeout(30, TimeUnit.SECONDS)
+                        .readTimeout(30, TimeUnit.SECONDS)
+                        .writeTimeout(30, TimeUnit.SECONDS)
+                        .build()
+                )
+                .build()
+                .create(OverpassApiService::class.java)
+
+        val database = WorkoutDatabase.getDatabase(applicationContext)
         val challengeResultDao = database.challengeResultDao()
+        val workoutDao = database.workoutDao()
 
-        Repository(apiService, challengeResultDao)
+        Repository(workoutApiService, overpassApiService, challengeResultDao, workoutDao)
     }
 
     private val workoutViewModel: WorkoutViewModel by viewModels {
@@ -104,7 +111,12 @@ class MainActivity : ComponentActivity() {
     private val exerciseViewModel: ExerciseViewModel by viewModels {
         MyViewModelFactory(repository)
     }
+
     private val challengeViewModel: ChallengeViewModel by viewModels {
+        MyViewModelFactory(repository)
+    }
+
+    private val mapViewModel: MapViewModel by viewModels {
         MyViewModelFactory(repository)
     }
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,7 +128,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
-                    AppNavigation(navController, exerciseViewModel, workoutViewModel, challengeViewModel)
+                    AppNavigation(navController, exerciseViewModel, workoutViewModel, challengeViewModel, mapViewModel)
                 }
             }
         }
@@ -124,15 +136,25 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AppNavigation(navController: NavHostController, exerciseViewModel: ExerciseViewModel, workoutViewModel: WorkoutViewModel, challengeViewModel: ChallengeViewModel) {
-    val items = listOf("home", "exerciseList", "workoutList", "challengeList")
+fun AppNavigation(
+    navController: NavHostController,
+    exerciseViewModel: ExerciseViewModel,
+    workoutViewModel: WorkoutViewModel,
+    challengeViewModel: ChallengeViewModel,
+    mapViewModel: MapViewModel
+) {
+    exerciseViewModel.fetchExercises()
+    workoutViewModel.fetchWorkouts()
+    challengeViewModel.fetchChallenges()
+
+    val items = listOf("home", "exerciseList", "workoutList", "challengeList", "maps")
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
     val selectedItem = items.indexOf(currentRoute).takeIf { it >= 0 } ?: -1
 
     Scaffold(
         bottomBar = {
-            if(currentRoute != "start") {
+            if(currentRoute != "") {
                 NavigationBar {
                     items.forEachIndexed { index, route ->
                         val label = when (route) {
@@ -140,26 +162,57 @@ fun AppNavigation(navController: NavHostController, exerciseViewModel: ExerciseV
                             "exerciseList" -> "Exercises"
                             "workoutList" -> "Workouts"
                             "challengeList" -> "Challenges"
+                            "maps" -> "Parks"
                             else -> "Home"
                         }
 
                         NavigationBarItem(
+                            modifier = Modifier.testTag(route + "BottomBarButton"),
                             icon = {
-                                Icon(
-                                    imageVector = when (route) {
-                                        "home" -> Icons.Default.Home
-                                        "exerciseList" -> Icons.Default.FitnessCenter
-                                        "workoutList" -> Icons.Default.PlayCircle
-                                        "challengeList" -> Icons.Default.AccessTimeFilled
-                                        else -> Icons.Default.Home
-                                    },
-                                    contentDescription = label
-                                )
+                                when (route) {
+                                    "maps" -> {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_location),
+                                            contentDescription = label,
+                                            tint = Color.Unspecified, // ha nem akarod újraszínezni az ikont
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    "challengeList" -> {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_progress),
+                                            contentDescription = label,
+                                            tint = Color.Unspecified, // ha nem akarod újraszínezni az ikont
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    "exerciseList" -> {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_pull_up),
+                                            contentDescription = label,
+                                            tint = Color.Unspecified, // ha nem akarod újraszínezni az ikont
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    "workoutList" -> {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayCircle,
+                                            contentDescription = label
+                                        )
+                                    }
+                                    "home" -> {
+                                        Icon(
+                                            imageVector = Icons.Default.Home,
+                                            contentDescription = label
+                                        )
+                                    }
+                                }
                             },
-                            label = { Text(label) },
+                            label = { Text(text = label, fontSize = 9.sp) },
                             selected = selectedItem == index,
                             onClick = {
-                                navController.navigate(route) {
+                                navController.navigate(route)
+                                {
                                     popUpTo("home") { inclusive = false }
                                     launchSingleTop = true
                                 }
@@ -172,10 +225,9 @@ fun AppNavigation(navController: NavHostController, exerciseViewModel: ExerciseV
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = "start",
+            startDestination = "home",
             modifier = Modifier.padding(padding)
         ) {
-            composable("start") { StartScreen(navController) }
             composable("home") { HomeScreen(navController) }
             composable("exerciseList") { ExerciseListScreen(navController, exerciseViewModel) }
             composable("exerciseDetail/{exerciseId}") { backStackEntry ->
@@ -202,10 +254,12 @@ fun AppNavigation(navController: NavHostController, exerciseViewModel: ExerciseV
                     navController.navigateUp()
                 }
             }
-            composable("workoutPlayer/{workoutId}") { backStackEntry ->
+            composable("workoutPlayer/{workoutId}/{remote}") { backStackEntry ->
                 val workoutId = backStackEntry.arguments?.getString("workoutId")?.toIntOrNull()
+                val remote = backStackEntry.arguments?.getString("remote")?.toBooleanStrictOrNull() ?: false
+
                 if (workoutId != null) {
-                    WorkoutPlayerScreen(navController, workoutId, workoutViewModel)
+                    WorkoutPlayerScreen(navController, workoutId, remote, workoutViewModel)
                 } else {
                     navController.navigateUp()
                 }
@@ -226,76 +280,8 @@ fun AppNavigation(navController: NavHostController, exerciseViewModel: ExerciseV
 
                 ChallengeResultsScreen(challengeId, challengeName, challengeViewModel, navController)
             }
+
+            composable("maps") { MapScreen(mapViewModel, navController) }
         }
-    }
-}
-
-@Composable
-fun StartScreen(navController: NavController) {
-    var showDialog by remember { mutableStateOf(true) }
-
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("Data Source") },
-            text = { Text("Use real data?") },
-            confirmButton = {
-                Button(onClick = {
-                    Config.USE_DUMMY_DATA = false
-                    showDialog = false
-                    navController.navigate("home") {
-                        popUpTo("start") { inclusive = true }
-                    }
-                }) {
-                    Text("Yes")
-                }
-            },
-            dismissButton = {
-                Button(onClick = {
-                    Config.USE_DUMMY_DATA = true
-                    showDialog = false
-                    navController.navigate("home") {
-                        popUpTo("start") { inclusive = true }
-                    }
-                }) {
-                    Text("No")
-                }
-            }
-        )
-    }
-}
-
-
-@Composable
-fun CustomCircularProgressCountdown(durationSeconds: Int) {
-    val progress = remember { Animatable(1f) }
-
-    LaunchedEffect(Unit) {
-        progress.animateTo(
-            targetValue = 0f,
-            animationSpec = tween(durationSeconds * 1000, easing = LinearEasing)
-        )
-    }
-
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier.size(120.dp)
-    ) {
-
-
-        CircularProgressIndicator(
-            progress = progress.value,
-            modifier = Modifier.size(120.dp),
-            strokeWidth = 12.dp,
-            color = lerp(Color.Green, Color.Red, 1f - progress.value)
-        )
-
-
-        Text(
-            text = "${(durationSeconds * progress.value).toInt()}s",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.Black
-        )
     }
 }
